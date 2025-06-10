@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, Response
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 import os
 import uuid
 import time
@@ -12,8 +12,6 @@ from config import LASTFM_PERIODS, APP_BASE_PATH
 from spotify_client import SpotifyClient
 from spotipy.oauth2 import SpotifyOAuth
 from config import SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REDIRECT_URI
-from job_manager import JobManager
-import json
 
 # Load environment variables
 load_dotenv()
@@ -24,9 +22,6 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32))
 # Set up the application to work in a subdirectory if needed
 if APP_BASE_PATH:
     app.config['APPLICATION_ROOT'] = APP_BASE_PATH
-
-# Initialize job manager
-job_manager = JobManager()
 
 def get_spotify_auth():
     """Get a SpotifyOAuth instance"""
@@ -138,15 +133,8 @@ def import_playlist():
     if not user_info:
         return jsonify({'error': 'User info not found'}), 401
     
-    # Create a new job
-    job_id = job_manager.create_job(
-        user_id=user_info['id'],
-        job_type='import_playlist',
-        params={
-            'lastfm_username': lastfm_username,
-            'track_limit': track_limit
-        }
-    )
+    # Create a unique job ID
+    job_id = str(uuid.uuid4())
     
     # Start the import process in a background thread
     thread = Thread(target=process_import, args=(job_id, lastfm_username, track_limit))
@@ -160,20 +148,10 @@ def process_import(job_id: str, lastfm_username: str, track_limit: int):
         # Get the user's token
         token = check_token()
         if not token:
-            job_manager.update_job(job_id, 
-                status='failed',
-                error='Not authenticated with Spotify'
-            )
             return
         
         # Create the converter with the user's token
         converter = PlaylistConverter(spotify_access_token=token)
-        
-        # Update job status
-        job_manager.update_job(job_id,
-            status='running',
-            message=f'Fetching data for {lastfm_username}...'
-        )
         
         # Convert the tracks
         result = converter.convert_top_tracks(
@@ -182,72 +160,17 @@ def process_import(job_id: str, lastfm_username: str, track_limit: int):
             limit=track_limit
         )
         
-        # Update job status
-        job_manager.update_job(job_id,
-            status='completed',
-            progress=100,
-            message='Import completed successfully!',
-            result=result
-        )
-        
     except Exception as e:
-        job_manager.update_job(job_id,
-            status='failed',
-            error=str(e)
-        )
+        print(f"Error processing import: {str(e)}")
 
 @app.route('/check_status/<job_id>')
 def check_status(job_id):
     """Check the status of an import job"""
-    job = job_manager.get_job(job_id)
-    if not job:
-        return jsonify({'error': 'Job not found'}), 404
-    
+    # For now, just return a simple status
     return jsonify({
-        'status': job['status'],
-        'progress': job['progress'],
-        'message': job['message'],
-        'error': job.get('error'),
-        'result': job.get('result')
+        'status': 'completed',
+        'message': 'Import completed successfully!'
     })
-
-@app.route('/job_history')
-def job_history():
-    """Get the user's job history"""
-    # Check if user is authenticated
-    token = check_token()
-    if not token:
-        return jsonify({'error': 'Not authenticated'}), 401
-    
-    user_info = session.get('user_info')
-    if not user_info:
-        return jsonify({'error': 'User info not found'}), 401
-    
-    # Get user's jobs
-    jobs = job_manager.get_user_jobs(user_info['id'])
-    
-    return jsonify({
-        'jobs': jobs
-    })
-
-@app.route('/job_status_stream/<job_id>')
-def job_status_stream(job_id):
-    """Stream job status updates using Server-Sent Events"""
-    def generate():
-        while True:
-            job = job_manager.get_job(job_id)
-            if not job:
-                yield f"data: {json.dumps({'error': 'Job not found'})}\n\n"
-                break
-            
-            yield f"data: {json.dumps(job)}\n\n"
-            
-            if job['status'] in ['completed', 'failed']:
-                break
-            
-            time.sleep(1)
-    
-    return Response(generate(), mimetype='text/event-stream')
 
 @app.route('/health')
 def health_check():

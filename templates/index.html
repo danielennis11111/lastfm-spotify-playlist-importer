@@ -86,23 +86,6 @@
             height: 24px;
             margin-right: 8px;
         }
-        .job-card {
-            margin-bottom: 1rem;
-            transition: all 0.3s ease;
-        }
-        .job-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-        }
-        .job-status {
-            font-size: 0.9rem;
-            padding: 0.25rem 0.5rem;
-            border-radius: 0.25rem;
-        }
-        .status-pending { background-color: #ffd700; }
-        .status-running { background-color: #1e90ff; color: white; }
-        .status-completed { background-color: #32cd32; color: white; }
-        .status-failed { background-color: #dc3545; color: white; }
     </style>
 </head>
 <body>
@@ -119,25 +102,19 @@
     <div class="container">
         <div class="row justify-content-center">
             <div class="col-md-8">
-                <div class="text-center mb-4">
-                    <h1 class="display-4 mb-3">Last.fm to Spotify Playlist Converter</h1>
-                    <div class="d-flex justify-content-center align-items-center mb-4">
-                        <img src="https://www.last.fm/static/images/lastfm_avatar_twitter.png" alt="Last.fm" class="logo">
-                        <i class="fas fa-arrow-right mx-3"></i>
-                        <img src="https://storage.googleapis.com/pr-newsroom-wp/1/2018/11/Spotify_Logo_RGB_Green.png" alt="Spotify" class="logo">
-                    </div>
-                </div>
-
                 <div class="card mb-4">
                     <div class="card-body">
-                        <h5 class="card-title">Spotify Connection</h5>
+                        <h5 class="card-title">Step 1: Connect to Spotify</h5>
                         <p class="card-text">
-                            Status: <span id="spotify-connected-status">Not Connected</span>
+                            To create playlists, you need to connect your Spotify account first.
                         </p>
                         <div id="spotify-login-btn-container">
                             <a href="{{ auth_url }}" class="btn btn-success">
                                 <i class="fab fa-spotify"></i> Connect with Spotify
                             </a>
+                        </div>
+                        <div id="spotify-connected-status" class="mt-3">
+                            <strong>Status:</strong> <span id="auth-status">Not Connected</span>
                         </div>
                     </div>
                 </div>
@@ -145,10 +122,10 @@
                 <div id="import-form" style="display: none;">
                     <div class="card mb-4">
                         <div class="card-body">
-                            <h5 class="card-title">Import Playlist</h5>
+                            <h5 class="card-title">Step 2: Import LastFM Data</h5>
                             <form id="import-form">
                                 <div class="mb-3">
-                                    <label for="lastfm-username" class="form-label">Last.fm Username</label>
+                                    <label for="lastfm-username" class="form-label">LastFM Username</label>
                                     <input type="text" class="form-control" id="lastfm-username" name="lastfm_username" required>
                                 </div>
                                 
@@ -179,10 +156,17 @@
                     </div>
                 </div>
 
-                <div id="job-history" class="card">
-                    <div class="card-body">
-                        <h5 class="card-title">Recent Imports</h5>
-                        <div id="jobs-container"></div>
+                <div id="import-results" style="display: none;">
+                    <div class="card mb-4">
+                        <div class="card-body">
+                            <h5 class="card-title">Import Complete!</h5>
+                            <div id="results-message"></div>
+                            <div class="mt-3">
+                                <a href="#" id="playlist-link" class="btn btn-success" target="_blank">
+                                    <i class="fab fa-spotify"></i> Open Playlist
+                                </a>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -191,32 +175,24 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        let currentJobId = null;
-        let eventSource = null;
-
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('Page loaded, checking auth status...');
             checkAuthStatus();
-            loadJobHistory();
         });
 
         async function checkAuthStatus() {
             try {
                 const response = await fetch('/check_auth');
                 const data = await response.json();
-                console.log('Auth check response:', data);
                 
-                const authStatus = document.getElementById('spotify-connected-status');
+                const authStatus = document.getElementById('auth-status');
                 const authButton = document.getElementById('spotify-login-btn-container');
                 const importForm = document.getElementById('import-form');
                 
                 if (data.authenticated) {
-                    console.log('User is authenticated');
                     authStatus.textContent = `Connected to Spotify as ${data.user_info.name}`;
                     authButton.style.display = 'none';
                     importForm.style.display = 'block';
                 } else {
-                    console.log('User is not authenticated');
                     authStatus.textContent = 'Not Connected';
                     authButton.style.display = 'block';
                     importForm.style.display = 'none';
@@ -226,91 +202,21 @@
             }
         }
 
-        async function loadJobHistory() {
-            try {
-                const response = await fetch('/job_history');
-                const data = await response.json();
-                
-                if (data.error) {
-                    console.error('Error loading job history:', data.error);
-                    return;
-                }
-                
-                const jobsContainer = document.getElementById('jobs-container');
-                jobsContainer.innerHTML = '';
-                
-                if (data.jobs.length === 0) {
-                    jobsContainer.innerHTML = '<p class="text-muted">No recent imports</p>';
-                    return;
-                }
-                
-                data.jobs.forEach(job => {
-                    const jobCard = createJobCard(job);
-                    jobsContainer.appendChild(jobCard);
-                });
-            } catch (error) {
-                console.error('Error loading job history:', error);
-            }
-        }
-
-        function createJobCard(job) {
-            const card = document.createElement('div');
-            card.className = 'card job-card';
-            
-            const statusClass = {
-                'pending': 'status-pending',
-                'running': 'status-running',
-                'completed': 'status-completed',
-                'failed': 'status-failed'
-            }[job.status] || '';
-            
-            const date = new Date(job.created_at).toLocaleString();
-            
-            card.innerHTML = `
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center mb-2">
-                        <h6 class="card-subtitle mb-2 text-muted">${date}</h6>
-                        <span class="job-status ${statusClass}">${job.status}</span>
-                    </div>
-                    <p class="card-text">${job.message}</p>
-                    ${job.result ? `
-                        <div class="mt-2">
-                            <a href="${job.result.playlist.url}" target="_blank" class="btn btn-sm btn-success">
-                                <i class="fab fa-spotify"></i> Open Playlist
-                            </a>
-                        </div>
-                    ` : ''}
-                </div>
-            `;
-            
-            return card;
-        }
-
         document.getElementById('import-form').addEventListener('submit', async function(e) {
             e.preventDefault();
             
             const lastfmUsername = document.getElementById('lastfm-username').value;
-            const trackLimit = parseInt(document.getElementById('limit').value);
-            
-            if (!lastfmUsername) {
-                alert('Please enter your Last.fm username');
-                return;
-            }
-            
-            if (trackLimit < 1 || trackLimit > 10000) {
-                alert('Track limit must be between 1 and 10,000');
-                return;
-            }
+            const trackLimit = document.getElementById('limit').value;
             
             // Show progress section
             document.getElementById('import-progress').style.display = 'block';
-            document.getElementById('import-form').style.display = 'none';
+            document.getElementById('import-results').style.display = 'none';
             
             try {
                 const response = await fetch('/import_playlist', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
+                        'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
                         lastfm_username: lastfmUsername,
@@ -324,65 +230,45 @@
                     throw new Error(data.error);
                 }
                 
-                // Start SSE for real-time updates
-                startJobStatusStream(data.job_id);
+                // Start checking status
+                checkImportStatus(data.job_id);
                 
             } catch (error) {
-                console.error('Error:', error);
+                console.error('Error starting import:', error);
                 document.getElementById('status-message').textContent = `Error: ${error.message}`;
             }
         });
 
-        function startJobStatusStream(jobId) {
-            if (eventSource) {
-                eventSource.close();
-            }
-            
-            eventSource = new EventSource(`/job_status_stream/${jobId}`);
-            
-            eventSource.onmessage = function(event) {
-                const job = JSON.parse(event.data);
+        async function checkImportStatus(jobId) {
+            try {
+                const response = await fetch(`/check_status/${jobId}`);
+                const data = await response.json();
                 
-                if (job.error) {
-                    console.error('Error in job stream:', job.error);
-                    eventSource.close();
-                    return;
+                if (data.error) {
+                    throw new Error(data.error);
                 }
                 
-                // Update progress bar
-                const progressBar = document.querySelector('.progress-bar');
-                progressBar.style.width = `${job.progress}%`;
-                
-                // Update status message
-                document.getElementById('status-message').textContent = job.message;
-                
-                // Update job history
-                loadJobHistory();
-                
-                // Close stream if job is complete
-                if (job.status === 'completed' || job.status === 'failed') {
-                    eventSource.close();
+                if (data.status === 'completed') {
+                    // Show results
+                    document.getElementById('import-progress').style.display = 'none';
+                    document.getElementById('import-results').style.display = 'block';
+                    document.getElementById('results-message').textContent = data.message;
                     
-                    // Show import form again after a delay
-                    setTimeout(() => {
-                        document.getElementById('import-progress').style.display = 'none';
-                        document.getElementById('import-form').style.display = 'block';
-                    }, 3000);
+                    if (data.result && data.result.playlist_url) {
+                        document.getElementById('playlist-link').href = data.result.playlist_url;
+                    }
+                } else {
+                    // Update progress
+                    document.getElementById('status-message').textContent = data.message;
+                    
+                    // Check again in 2 seconds
+                    setTimeout(() => checkImportStatus(jobId), 2000);
                 }
-            };
-            
-            eventSource.onerror = function(error) {
-                console.error('SSE Error:', error);
-                eventSource.close();
-            };
-        }
-
-        // Cleanup on page unload
-        window.addEventListener('beforeunload', () => {
-            if (eventSource) {
-                eventSource.close();
+            } catch (error) {
+                console.error('Error checking status:', error);
+                document.getElementById('status-message').textContent = `Error: ${error.message}`;
             }
-        });
+        }
     </script>
 </body>
 </html> 
