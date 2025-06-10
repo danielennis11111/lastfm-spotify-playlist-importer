@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, Response
 import os
 import uuid
 import time
@@ -12,6 +12,8 @@ from config import LASTFM_PERIODS, APP_BASE_PATH
 from spotify_client import SpotifyClient
 from spotipy.oauth2 import SpotifyOAuth
 from config import SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REDIRECT_URI
+from job_manager import JobManager
+import json
 
 # Load environment variables
 load_dotenv()
@@ -23,8 +25,8 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', secrets.token_hex(32))
 if APP_BASE_PATH:
     app.config['APPLICATION_ROOT'] = APP_BASE_PATH
 
-# Dictionary to store ongoing import jobs and their status
-import_jobs = {}
+# Initialize job manager
+job_manager = JobManager()
 
 def get_spotify_auth():
     """Get a SpotifyOAuth instance"""
@@ -38,47 +40,36 @@ def get_spotify_auth():
     )
 
 def check_token():
-    """Check if the Spotify token is valid and refresh if necessary"""
-    if 'spotify_token' not in session:
+    """Check if the current token is valid and refresh if needed"""
+    if 'token_info' not in session:
         return None
     
-    # Check if token is expired and refresh if needed
-    if session.get('spotify_token_expires_at', 0) < int(time.time()):
-        try:
-            auth_manager = get_spotify_auth()
-            refresh_token = session.get('spotify_refresh_token')
-            
-            if not refresh_token:
-                return None
-                
-            token_info = auth_manager.refresh_access_token(refresh_token)
-            
-            # Update session with new token info
-            session['spotify_token'] = token_info['access_token']
-            session['spotify_refresh_token'] = token_info.get('refresh_token', refresh_token)
-            session['spotify_token_expires_at'] = token_info['expires_at']
-            session.modified = True
-            
-        except Exception as e:
-            session.clear()
-            return None
+    token_info = session['token_info']
+    if not token_info:
+        return None
     
-    return session['spotify_token']
+    # Check if token is expired
+    if time.time() > token_info['expires_at']:
+        auth_manager = get_spotify_auth()
+        token_info = auth_manager.refresh_access_token(token_info['refresh_token'])
+        session['token_info'] = token_info
+    
+    return token_info['access_token']
 
 @app.route('/')
 def index():
     """Render the main page"""
-    # Generate a state value for OAuth security
+    # Generate a random state value for OAuth security
     state = secrets.token_urlsafe(16)
-    session['spotify_auth_state'] = state
+    session['state'] = state
     
-    # Create the Spotify authorization URL
+    # Get the authorization URL
     auth_manager = get_spotify_auth()
     auth_url = auth_manager.get_authorize_url(state=state)
     
     # Check if user is already authenticated
     token = check_token()
-    is_authenticated = bool(token)
+    is_authenticated = token is not None
     
     return render_template('index.html', 
                          auth_url=auth_url,
@@ -87,8 +78,8 @@ def index():
 @app.route('/callback')
 def callback():
     """Handle the Spotify OAuth callback"""
-    # Verify state parameter to prevent CSRF
-    if request.args.get('state') != session.get('spotify_auth_state'):
+    # Verify state parameter
+    if request.args.get('state') != session.get('state'):
         return redirect(url_for('index'))
     
     # Get the authorization code
@@ -96,28 +87,19 @@ def callback():
     if not code:
         return redirect(url_for('index'))
     
-    try:
-        # Exchange code for tokens
-        auth_manager = get_spotify_auth()
-        token_info = auth_manager.get_access_token(code)
-        
-        # Store tokens in session
-        session['spotify_token'] = token_info['access_token']
-        session['spotify_refresh_token'] = token_info.get('refresh_token')
-        session['spotify_token_expires_at'] = token_info['expires_at']
-        
-        # Get user info
-        spotify_client = SpotifyClient(access_token=token_info['access_token'])
-        user_info = spotify_client.get_current_user_info()
-        
-        # Store user info in session
-        session['spotify_user_info'] = user_info
-        session.modified = True
-        
-        return redirect(url_for('index'))
-        
-    except Exception as e:
-        return redirect(url_for('index'))
+    # Exchange code for token
+    auth_manager = get_spotify_auth()
+    token_info = auth_manager.get_access_token(code)
+    
+    # Store token in session
+    session['token_info'] = token_info
+    
+    # Get user info
+    sp = SpotifyClient(access_token=token_info['access_token'])
+    user_info = sp.get_current_user_info()
+    session['user_info'] = user_info
+    
+    return redirect(url_for('index'))
 
 @app.route('/check_auth')
 def check_auth():
@@ -126,15 +108,11 @@ def check_auth():
     if not token:
         return jsonify({'authenticated': False})
     
-    user_info = session.get('spotify_user_info')
+    user_info = session.get('user_info')
     if not user_info:
-        try:
-            spotify_client = SpotifyClient(access_token=token)
-            user_info = spotify_client.get_current_user_info()
-            session['spotify_user_info'] = user_info
-            session.modified = True
-        except Exception:
-            return jsonify({'authenticated': False})
+        sp = SpotifyClient(access_token=token)
+        user_info = sp.get_current_user_info()
+        session['user_info'] = user_info
     
     return jsonify({
         'authenticated': True,
@@ -156,16 +134,19 @@ def import_playlist():
     if not token:
         return jsonify({'error': 'Not authenticated with Spotify'}), 401
     
-    # Create a unique job ID
-    job_id = str(uuid.uuid4())
+    user_info = session.get('user_info')
+    if not user_info:
+        return jsonify({'error': 'User info not found'}), 401
     
-    # Initialize job status
-    import_jobs[job_id] = {
-        'status': 'pending',
-        'progress': 0,
-        'message': 'Initializing...',
-        'start_time': time.time()
-    }
+    # Create a new job
+    job_id = job_manager.create_job(
+        user_id=user_info['id'],
+        job_type='import_playlist',
+        params={
+            'lastfm_username': lastfm_username,
+            'track_limit': track_limit
+        }
+    )
     
     # Start the import process in a background thread
     thread = Thread(target=process_import, args=(job_id, lastfm_username, track_limit))
@@ -179,16 +160,20 @@ def process_import(job_id: str, lastfm_username: str, track_limit: int):
         # Get the user's token
         token = check_token()
         if not token:
-            import_jobs[job_id]['status'] = 'failed'
-            import_jobs[job_id]['error'] = 'Not authenticated with Spotify'
+            job_manager.update_job(job_id, 
+                status='failed',
+                error='Not authenticated with Spotify'
+            )
             return
         
         # Create the converter with the user's token
         converter = PlaylistConverter(spotify_access_token=token)
         
         # Update job status
-        import_jobs[job_id]['status'] = 'running'
-        import_jobs[job_id]['message'] = f'Fetching data for {lastfm_username}...'
+        job_manager.update_job(job_id,
+            status='running',
+            message=f'Fetching data for {lastfm_username}...'
+        )
         
         # Convert the tracks
         result = converter.convert_top_tracks(
@@ -198,22 +183,26 @@ def process_import(job_id: str, lastfm_username: str, track_limit: int):
         )
         
         # Update job status
-        import_jobs[job_id]['status'] = 'completed'
-        import_jobs[job_id]['progress'] = 100
-        import_jobs[job_id]['message'] = 'Import completed successfully!'
-        import_jobs[job_id]['result'] = result
+        job_manager.update_job(job_id,
+            status='completed',
+            progress=100,
+            message='Import completed successfully!',
+            result=result
+        )
         
     except Exception as e:
-        import_jobs[job_id]['status'] = 'failed'
-        import_jobs[job_id]['error'] = str(e)
+        job_manager.update_job(job_id,
+            status='failed',
+            error=str(e)
+        )
 
 @app.route('/check_status/<job_id>')
 def check_status(job_id):
     """Check the status of an import job"""
-    if job_id not in import_jobs:
+    job = job_manager.get_job(job_id)
+    if not job:
         return jsonify({'error': 'Job not found'}), 404
     
-    job = import_jobs[job_id]
     return jsonify({
         'status': job['status'],
         'progress': job['progress'],
@@ -222,11 +211,43 @@ def check_status(job_id):
         'result': job.get('result')
     })
 
-@app.route('/logout')
-def logout():
-    """Clear the session data"""
-    session.clear()
-    return redirect(url_for('index'))
+@app.route('/job_history')
+def job_history():
+    """Get the user's job history"""
+    # Check if user is authenticated
+    token = check_token()
+    if not token:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    user_info = session.get('user_info')
+    if not user_info:
+        return jsonify({'error': 'User info not found'}), 401
+    
+    # Get user's jobs
+    jobs = job_manager.get_user_jobs(user_info['id'])
+    
+    return jsonify({
+        'jobs': jobs
+    })
+
+@app.route('/job_status_stream/<job_id>')
+def job_status_stream(job_id):
+    """Stream job status updates using Server-Sent Events"""
+    def generate():
+        while True:
+            job = job_manager.get_job(job_id)
+            if not job:
+                yield f"data: {json.dumps({'error': 'Job not found'})}\n\n"
+                break
+            
+            yield f"data: {json.dumps(job)}\n\n"
+            
+            if job['status'] in ['completed', 'failed']:
+                break
+            
+            time.sleep(1)
+    
+    return Response(generate(), mimetype='text/event-stream')
 
 @app.route('/health')
 def health_check():
@@ -234,12 +255,4 @@ def health_check():
     return jsonify({'status': 'healthy'})
 
 if __name__ == '__main__':
-    # Create templates directory if it doesn't exist
-    os.makedirs('templates', exist_ok=True)
-    
-    # For local development
-    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8000)))
-else:
-    # For production
-    # Create templates directory if it doesn't exist
-    os.makedirs('templates', exist_ok=True) 
+    app.run(host='0.0.0.0', port=8000, debug=True) 
