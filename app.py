@@ -8,10 +8,18 @@ import secrets
 from threading import Thread
 from dotenv import load_dotenv
 from playlist_converter import PlaylistConverter
-from config import LASTFM_PERIODS, APP_BASE_PATH
+from config import LASTFM_PERIODS, APP_BASE_PATH, LASTFM_API_KEY
 from spotify_client import SpotifyClient
 from spotipy.oauth2 import SpotifyOAuth
 from config import SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REDIRECT_URI
+from spotipy.exceptions import SpotifyException
+import logging
+from job_manager import job_manager
+import threading
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -232,82 +240,27 @@ def callback():
 def check_auth():
     # Check if user is authenticated with Spotify
     token = check_token()
-    
     if token:
         try:
-            # Get basic user info to confirm we're authenticated
             spotify_client = SpotifyClient(access_token=token)
             user_info = spotify_client.get_current_user_info()
-            
             return jsonify({
-                "authenticated": True,
-                "user_info": user_info
+                'authenticated': True,
+                'user': user_info
             })
         except Exception as e:
-            print(f"Error checking authentication: {str(e)}")
-            # If there's an error, clear the session
-            session.pop('spotify_token', None)
-            session.pop('spotify_refresh_token', None)
-            session.pop('spotify_token_expires_at', None)
-            return jsonify({
-                "authenticated": False,
-                "error": str(e)
-            })
-    
-    return jsonify({"authenticated": False})
-
-
-@app.route('/start_import', methods=['POST'])
-def start_import():
-    # Check if user is authenticated with Spotify
-    token = check_token()
-    
-    if not token:
-        return jsonify({"error": "Not authenticated with Spotify. Please log in first."}), 401
-    
-    lastfm_username = request.form.get('lastfm_username')
-    import_type = request.form.get('import_type', 'top')
-    limit = int(request.form.get('limit', 50))
-    period = request.form.get('period', 'overall')
-    
-    if not lastfm_username:
-        return jsonify({"error": "LastFM username is required"}), 400
-    
-    # Create a unique ID for this job
-    job_id = str(uuid.uuid4())
-    
-    # Create job object with the user's Spotify token
-    job = ImportJob(
-        job_id, 
-        lastfm_username, 
-        import_type, 
-        limit, 
-        period, 
-        spotify_token=token
-    )
-    import_jobs[job_id] = job
-    
-    # Start a background thread to run the import
-    thread = Thread(target=run_import_job, args=(job,))
-    thread.daemon = True
-    thread.start()
-    
-    return jsonify({"job_id": job_id})
+            print(f"Error getting user info: {e}")
+            return jsonify({'authenticated': False})
+    return jsonify({'authenticated': False})
 
 
 @app.route('/job_status/<job_id>')
 def job_status(job_id):
-    job = import_jobs.get(job_id)
-    if not job:
-        return jsonify({"error": "Job not found"}), 404
-    
-    return jsonify({
-        "status": job.status,
-        "progress": job.progress,
-        "message": job.message,
-        "result": job.result,
-        "error": job.error
-    })
+    # Get job status from the job manager
+    job = job_manager.get_job(job_id)
+    if job:
+        return jsonify(job)
+    return jsonify({"error": "Job not found"}), 404
 
 
 @app.route('/user_info/<lastfm_username>')
@@ -348,57 +301,114 @@ def get_progress(job_id):
     return jsonify({"error": "Job not found"}), 404
 
 
-@app.route('/import_playlist', methods=['POST'])
-def import_playlist():
-    data = request.get_json()
-    lastfm_username = data.get('lastfm_username')
-    period = data.get('period', 'overall')
+@app.route('/api/jobs')
+def get_jobs():
+    """Get all jobs for the current user"""
+    if not session.get('spotify_token'):
+        return jsonify([])
+    
+    jobs = job_manager.get_user_jobs()
+    return jsonify(jobs)
+
+
+def process_import_job(job_id: str, username: str, import_type: str, period: str, limit: int):
+    """Process an import job in a background thread"""
+    try:
+        converter = PlaylistConverter(lastfm_api_key=LASTFM_API_KEY)
+        job_manager.update_job(job_id, 'in_progress', 0, 'Starting import...')
+        
+        # Get tracks from Last.fm
+        tracks = converter.get_lastfm_tracks(username, import_type, period, limit)
+        if not tracks:
+            raise Exception("No tracks found")
+            
+        # Update progress
+        job_manager.update_job(job_id, 'in_progress', 30, 'Found tracks, searching on Spotify...')
+        
+        # Search tracks on Spotify
+        spotify_tracks = []
+        failed_tracks = []
+        for i, track in enumerate(tracks):
+            try:
+                # Truncate track name to 200 characters
+                track['name'] = track['name'][:200]
+                
+                spotify_track = converter.search_spotify_track(track)
+                if spotify_track:
+                    spotify_tracks.append(spotify_track)
+                else:
+                    failed_tracks.append(track)
+                
+                # Update progress
+                progress = 30 + int((i / len(tracks)) * 40)
+                job_manager.update_job(job_id, 'in_progress', progress, 
+                                     f'Found {len(spotify_tracks)}/{i+1} tracks on Spotify')
+            except Exception as e:
+                logger.error(f"Error processing track {track.get('name', 'unknown')}: {str(e)}")
+                failed_tracks.append(track)
+                continue
+        
+        if not spotify_tracks:
+            raise Exception("No matching tracks found on Spotify")
+        
+        # Create playlist
+        job_manager.update_job(job_id, 'in_progress', 80, 'Creating Spotify playlist...')
+        playlist = converter.create_spotify_playlist(
+            session['spotify_token'],
+            f"Last.fm {import_type.title()} - {period}",
+            spotify_tracks
+        )
+        
+        job_manager.update_job(job_id, 'completed', 100, 
+                             f'Successfully created playlist with {len(spotify_tracks)} tracks',
+                             result={
+                                 'playlist_url': playlist['external_urls']['spotify'],
+                                 'total_tracks': len(tracks),
+                                 'matched_tracks': len(spotify_tracks),
+                                 'failed_tracks': len(failed_tracks),
+                                 'failed_track_details': failed_tracks
+                             })
+        
+    except Exception as e:
+        logger.error(f"Error processing job {job_id}: {str(e)}")
+        job_manager.update_job(job_id, 'failed', 0, f'Import failed: {str(e)}', error=str(e))
+
+
+@app.route('/api/import', methods=['POST'])
+def start_import():
+    """Start a new import job"""
+    if not session.get('spotify_token'):
+        return jsonify({'error': 'Not authenticated with Spotify'}), 401
+    
+    data = request.json
+    username = data.get('username')
+    import_type = data.get('import_type')
+    period = data.get('period')
     limit = int(data.get('limit', 50))
     
-    if not lastfm_username:
-        return jsonify({"error": "Last.fm username is required"}), 400
+    if not all([username, import_type, period]):
+        return jsonify({'error': 'Missing required parameters'}), 400
     
-    # Generate a unique job ID for this import
-    job_id = str(uuid.uuid4())
-    import_progress[job_id] = {"total": limit, "processed": 0, "status": "in_progress"}
+    if limit < 10 or limit > 10000:
+        return jsonify({'error': 'Invalid track limit'}), 400
     
-    try:
-        # Fetch tracks from Last.fm
-        tracks = get_lastfm_tracks(lastfm_username, period, limit)
-        if not tracks:
-            import_progress[job_id]["status"] = "failed"
-            import_progress[job_id]["error"] = "No tracks found"
-            return jsonify({"error": "No tracks found"}), 404
-        
-        # Create a new playlist in Spotify
-        playlist_name = f"Last.fm {period} for {lastfm_username}"
-        playlist = create_spotify_playlist(playlist_name)
-        
-        # Add tracks to the playlist
-        added_tracks = []
-        for i, track in enumerate(tracks):
-            spotify_track = search_spotify_track(track['name'], track['artist'])
-            if spotify_track:
-                added_tracks.append(spotify_track)
-            # Update progress after each track
-            import_progress[job_id]["processed"] = i + 1
-        
-        if added_tracks:
-            add_tracks_to_playlist(playlist['id'], added_tracks)
-            import_progress[job_id]["status"] = "completed"
-            return jsonify({
-                "message": f"Successfully imported {len(added_tracks)} tracks to Spotify",
-                "playlist_url": playlist['external_urls']['spotify'],
-                "job_id": job_id
-            })
-        else:
-            import_progress[job_id]["status"] = "failed"
-            import_progress[job_id]["error"] = "No tracks could be added to Spotify"
-            return jsonify({"error": "No tracks could be added to Spotify"}), 404
-    except Exception as e:
-        import_progress[job_id]["status"] = "failed"
-        import_progress[job_id]["error"] = str(e)
-        return jsonify({"error": str(e)}), 500
+    # Create new job
+    job_id = job_manager.create_job('import', {
+        'username': username,
+        'import_type': import_type,
+        'period': period,
+        'limit': limit
+    })
+    
+    # Start processing in background
+    thread = threading.Thread(
+        target=process_import_job,
+        args=(job_id, username, import_type, period, limit)
+    )
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({'job_id': job_id})
 
 
 if __name__ == '__main__':

@@ -182,16 +182,26 @@
                     
                     <div class="mb-3">
                         <label for="limit" class="form-label">Number of Tracks to Import</label>
-                        <div class="d-flex align-items-center">
-                            <input type="range" class="form-range flex-grow-1 me-2" id="limit" name="limit" min="10" max="10000" step="10" value="50">
-                            <span id="limit-value" class="badge bg-primary" style="width: 70px; text-align: center;">50</span>
+                        <div class="input-group">
+                            <input type="number" class="form-control" id="limit" name="limit" 
+                                   min="10" max="10000" value="50" required>
+                            <span class="input-group-text">tracks</span>
                         </div>
+                        <div class="form-text">Enter a number between 10 and 10,000</div>
                     </div>
                     
                     <div class="d-grid gap-2">
                         <button type="submit" class="btn btn-primary btn-lg" id="start-import-btn" disabled>Start Import</button>
                     </div>
                 </form>
+                
+                <!-- Active Jobs Section -->
+                <div id="active-jobs" class="mt-4" style="display: none;">
+                    <h4>Your Active Imports</h4>
+                    <div id="jobs-list" class="list-group">
+                        <!-- Jobs will be populated here -->
+                    </div>
+                </div>
                 
                 <div id="import-progress" style="display: none;">
                     <h4 class="mt-4">Import Progress</h4>
@@ -338,41 +348,47 @@
             importForm.addEventListener('submit', function(e) {
                 e.preventDefault();
                 
-                const formData = new FormData(importForm);
+                const username = document.getElementById('lastfm-username').value;
+                const importType = document.querySelector('input[name="import_type"]:checked').value;
+                const period = document.getElementById('period').value;
+                const limit = document.getElementById('limit').value;
+                
+                // Disable the form while processing
+                const submitBtn = document.getElementById('start-import-btn');
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Starting Import...';
                 
                 // Show progress section
-                importProgress.style.display = 'block';
-                importResults.style.display = 'none';
+                const progressSection = document.getElementById('import-progress');
+                progressSection.style.display = 'block';
                 
-                // Disable form
-                const formElements = importForm.elements;
-                for (let i = 0; i < formElements.length; i++) {
-                    formElements[i].disabled = true;
-                }
-                
-                // Start import
-                fetch('/start_import', {
+                // Start the import
+                fetch('/api/import', {
                     method: 'POST',
-                    body: formData
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: username,
+                        import_type: importType,
+                        period: period,
+                        limit: parseInt(limit)
+                    })
                 })
                 .then(response => response.json())
                 .then(data => {
                     if (data.error) {
-                        statusMessage.textContent = `Error: ${data.error}`;
-                        return;
+                        throw new Error(data.error);
                     }
-                    
-                    const jobId = data.job_id;
-                    checkJobStatus(jobId);
+                    // The job has been started, the progress will be updated by the updateActiveJobs function
+                    submitBtn.innerHTML = 'Start Import';
+                    submitBtn.disabled = false;
                 })
                 .catch(error => {
                     console.error('Error:', error);
-                    statusMessage.textContent = 'Error starting import. Please try again.';
-                    
-                    // Re-enable form
-                    for (let i = 0; i < formElements.length; i++) {
-                        formElements[i].disabled = false;
-                    }
+                    submitBtn.innerHTML = 'Start Import';
+                    submitBtn.disabled = false;
+                    alert('Error starting import: ' + error.message);
                 });
             });
             
@@ -417,6 +433,95 @@
                         statusMessage.textContent = 'Error checking import status. Please refresh the page.';
                     });
             }
+
+            // Function to update active jobs
+            function updateActiveJobs() {
+                fetch('/api/jobs')
+                    .then(response => response.json())
+                    .then(jobs => {
+                        const jobsList = document.getElementById('jobs-list');
+                        const activeJobs = document.getElementById('active-jobs');
+                        
+                        if (jobs.length > 0) {
+                            activeJobs.style.display = 'block';
+                            jobsList.innerHTML = jobs.map(job => `
+                                <div class="list-group-item">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <h6 class="mb-1">${job.type} Import</h6>
+                                            <p class="mb-1 text-muted">${job.message}</p>
+                                            ${job.stats ? `
+                                                <div class="mt-2">
+                                                    <small class="text-muted">
+                                                        Tracks: ${job.stats.matched_tracks}/${job.stats.total_tracks} matched
+                                                        ${job.stats.failed_tracks > 0 ? 
+                                                            `<span class="text-warning">(${job.stats.failed_tracks} failed)</span>` : 
+                                                            ''}
+                                                    </small>
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                        <div class="text-end">
+                                            <span class="badge bg-${getStatusBadgeColor(job.status)}">${job.status}</span>
+                                            <div class="progress mt-2" style="width: 100px;">
+                                                <div class="progress-bar" role="progressbar" 
+                                                     style="width: ${job.progress}%" 
+                                                     aria-valuenow="${job.progress}" 
+                                                     aria-valuemin="0" 
+                                                     aria-valuemax="100">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    ${job.result && job.result.failed_track_details && job.result.failed_track_details.length > 0 ? `
+                                        <div class="mt-2">
+                                            <button class="btn btn-sm btn-outline-warning" type="button" 
+                                                    data-bs-toggle="collapse" 
+                                                    data-bs-target="#failed-tracks-${job.id}">
+                                                Show Failed Tracks
+                                            </button>
+                                            <div class="collapse mt-2" id="failed-tracks-${job.id}">
+                                                <div class="card card-body">
+                                                    <ul class="list-unstyled mb-0">
+                                                        ${job.result.failed_track_details.map(track => `
+                                                            <li class="text-muted">
+                                                                ${track.name} - ${track.artist}
+                                                            </li>
+                                                        `).join('')}
+                                                    </ul>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `).join('');
+                        } else {
+                            activeJobs.style.display = 'none';
+                        }
+                    })
+                    .catch(error => console.error('Error fetching jobs:', error));
+            }
+
+            function getStatusBadgeColor(status) {
+                switch (status) {
+                    case 'completed': return 'success';
+                    case 'failed': return 'danger';
+                    case 'in_progress': return 'primary';
+                    default: return 'secondary';
+                }
+            }
+
+            // Update jobs every 5 seconds
+            setInterval(updateActiveJobs, 5000);
+            updateActiveJobs(); // Initial update
+
+            // Validate number input
+            document.getElementById('limit').addEventListener('input', function(e) {
+                let value = parseInt(e.target.value);
+                if (value < 10) value = 10;
+                if (value > 10000) value = 10000;
+                e.target.value = value;
+            });
         });
     </script>
 </body>

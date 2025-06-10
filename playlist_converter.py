@@ -1,12 +1,17 @@
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 from tqdm import tqdm
 import time
 from datetime import datetime
+import requests
+import logging
 
 from lastfm_client import LastFmClient
 from spotify_client import SpotifyClient
 from config import MAX_TRACKS_PER_PLAYLIST, LASTFM_PERIODS
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class PlaylistConverter:
     """Main class for converting Last.fm data to Spotify playlists"""
@@ -37,100 +42,140 @@ class PlaylistConverter:
         
         print("✅ Initialization complete!")
     
-    def convert_top_tracks(self, lastfm_username: str, period: str = 'overall', 
-                          limit: int = 50, playlist_name: str = None, 
-                          playlist_description: str = None, public: bool = True) -> Dict:
-        """Convert Last.fm top tracks to a Spotify playlist"""
-        
-        if period not in LASTFM_PERIODS:
-            raise ValueError(f"Invalid period. Choose from: {list(LASTFM_PERIODS.keys())}")
-        
-        print(f"\n🎵 Fetching top tracks for {lastfm_username} ({period})...")
-        
-        # Fetch Last.fm data
-        lastfm_tracks = self._fetch_all_tracks(
-            self.lastfm.get_user_top_tracks, 
-            lastfm_username, 
-            period=period, 
-            limit=limit
-        )
-        
-        if not lastfm_tracks:
-            raise Exception("No tracks found on Last.fm")
-        
-        # Generate playlist name if not provided
-        if not playlist_name:
-            user_info = self.lastfm.get_user_info(lastfm_username)
-            display_name = user_info.get('realname') or user_info.get('name') or lastfm_username
-            period_name = period.replace('month', ' months').replace('day', ' days')
-            playlist_name = f"{display_name}'s Top Tracks ({period_name})"
-        
-        if not playlist_description:
-            playlist_description = f"Top tracks from Last.fm user {lastfm_username} for period: {period}"
-        
-        return self._create_spotify_playlist(
-            lastfm_tracks, playlist_name, playlist_description, public
-        )
+    def convert_top_tracks(self, username: str, period: str = 'overall', limit: int = 50) -> Dict[str, Any]:
+        """Convert Last.fm top tracks to Spotify playlist with better error handling"""
+        try:
+            # Get tracks from Last.fm
+            tracks = self.get_lastfm_tracks(username, 'top', period, limit)
+            if not tracks:
+                raise Exception("No tracks found")
+            
+            # Search tracks on Spotify with progress tracking
+            spotify_tracks = []
+            failed_tracks = []
+            
+            for i, track in enumerate(tracks):
+                try:
+                    spotify_track = self.search_spotify_track(track)
+                    if spotify_track:
+                        spotify_tracks.append(spotify_track)
+                    else:
+                        failed_tracks.append(track)
+                except Exception as e:
+                    logger.error(f"Error processing track {track.get('name', 'unknown')}: {str(e)}")
+                    failed_tracks.append(track)
+                    continue
+            
+            if not spotify_tracks:
+                raise Exception("No matching tracks found on Spotify")
+            
+            # Create playlist
+            playlist = self.create_spotify_playlist(
+                f"Last.fm Top Tracks - {period}",
+                spotify_tracks
+            )
+            
+            return {
+                'playlist': playlist,
+                'total_tracks': len(tracks),
+                'matched_tracks': len(spotify_tracks),
+                'failed_tracks': len(failed_tracks),
+                'failed_track_details': failed_tracks
+            }
+            
+        except Exception as e:
+            logger.error(f"Error converting top tracks: {str(e)}")
+            raise
     
-    def convert_recent_tracks(self, lastfm_username: str, limit: int = 50,
-                             playlist_name: str = None, playlist_description: str = None, 
-                             public: bool = True) -> Dict:
-        """Convert Last.fm recent tracks to a Spotify playlist"""
-        
-        print(f"\n🎵 Fetching recent tracks for {lastfm_username}...")
-        
-        # Fetch Last.fm data
-        lastfm_tracks = self._fetch_all_tracks(
-            self.lastfm.get_user_recent_tracks,
-            lastfm_username,
-            limit=limit
-        )
-        
-        if not lastfm_tracks:
-            raise Exception("No recent tracks found on Last.fm")
-        
-        # Generate playlist name if not provided
-        if not playlist_name:
-            user_info = self.lastfm.get_user_info(lastfm_username)
-            display_name = user_info.get('realname') or user_info.get('name') or lastfm_username
-            playlist_name = f"{display_name}'s Recent Tracks"
-        
-        if not playlist_description:
-            playlist_description = f"Recent tracks from Last.fm user {lastfm_username}"
-        
-        return self._create_spotify_playlist(
-            lastfm_tracks, playlist_name, playlist_description, public
-        )
+    def convert_recent_tracks(self, username: str, limit: int = 50) -> Dict[str, Any]:
+        """Convert Last.fm recent tracks to Spotify playlist with better error handling"""
+        try:
+            # Get tracks from Last.fm
+            tracks = self.get_lastfm_tracks(username, 'recent', limit=limit)
+            if not tracks:
+                raise Exception("No tracks found")
+            
+            # Search tracks on Spotify with progress tracking
+            spotify_tracks = []
+            failed_tracks = []
+            
+            for i, track in enumerate(tracks):
+                try:
+                    spotify_track = self.search_spotify_track(track)
+                    if spotify_track:
+                        spotify_tracks.append(spotify_track)
+                    else:
+                        failed_tracks.append(track)
+                except Exception as e:
+                    logger.error(f"Error processing track {track.get('name', 'unknown')}: {str(e)}")
+                    failed_tracks.append(track)
+                    continue
+            
+            if not spotify_tracks:
+                raise Exception("No matching tracks found on Spotify")
+            
+            # Create playlist
+            playlist = self.create_spotify_playlist(
+                f"Last.fm Recent Tracks",
+                spotify_tracks
+            )
+            
+            return {
+                'playlist': playlist,
+                'total_tracks': len(tracks),
+                'matched_tracks': len(spotify_tracks),
+                'failed_tracks': len(failed_tracks),
+                'failed_track_details': failed_tracks
+            }
+            
+        except Exception as e:
+            logger.error(f"Error converting recent tracks: {str(e)}")
+            raise
     
-    def convert_loved_tracks(self, lastfm_username: str, limit: int = 50,
-                            playlist_name: str = None, playlist_description: str = None,
-                            public: bool = True) -> Dict:
-        """Convert Last.fm loved tracks to a Spotify playlist"""
-        
-        print(f"\n❤️ Fetching loved tracks for {lastfm_username}...")
-        
-        # Fetch Last.fm data
-        lastfm_tracks = self._fetch_all_tracks(
-            self.lastfm.get_user_loved_tracks,
-            lastfm_username,
-            limit=limit
-        )
-        
-        if not lastfm_tracks:
-            raise Exception("No loved tracks found on Last.fm")
-        
-        # Generate playlist name if not provided
-        if not playlist_name:
-            user_info = self.lastfm.get_user_info(lastfm_username)
-            display_name = user_info.get('realname') or user_info.get('name') or lastfm_username
-            playlist_name = f"{display_name}'s Loved Tracks"
-        
-        if not playlist_description:
-            playlist_description = f"Loved tracks from Last.fm user {lastfm_username}"
-        
-        return self._create_spotify_playlist(
-            lastfm_tracks, playlist_name, playlist_description, public
-        )
+    def convert_loved_tracks(self, username: str, limit: int = 50) -> Dict[str, Any]:
+        """Convert Last.fm loved tracks to Spotify playlist with better error handling"""
+        try:
+            # Get tracks from Last.fm
+            tracks = self.get_lastfm_tracks(username, 'loved', limit=limit)
+            if not tracks:
+                raise Exception("No tracks found")
+            
+            # Search tracks on Spotify with progress tracking
+            spotify_tracks = []
+            failed_tracks = []
+            
+            for i, track in enumerate(tracks):
+                try:
+                    spotify_track = self.search_spotify_track(track)
+                    if spotify_track:
+                        spotify_tracks.append(spotify_track)
+                    else:
+                        failed_tracks.append(track)
+                except Exception as e:
+                    logger.error(f"Error processing track {track.get('name', 'unknown')}: {str(e)}")
+                    failed_tracks.append(track)
+                    continue
+            
+            if not spotify_tracks:
+                raise Exception("No matching tracks found on Spotify")
+            
+            # Create playlist
+            playlist = self.create_spotify_playlist(
+                f"Last.fm Loved Tracks",
+                spotify_tracks
+            )
+            
+            return {
+                'playlist': playlist,
+                'total_tracks': len(tracks),
+                'matched_tracks': len(spotify_tracks),
+                'failed_tracks': len(failed_tracks),
+                'failed_track_details': failed_tracks
+            }
+            
+        except Exception as e:
+            logger.error(f"Error converting loved tracks: {str(e)}")
+            raise
     
     def _fetch_all_tracks(self, fetch_func, username: str, limit: int, **kwargs) -> List[Dict]:
         """Fetch all tracks using pagination"""
@@ -266,4 +311,105 @@ class PlaylistConverter:
         else:
             raise ValueError("data_type must be 'top', 'recent', or 'loved'")
         
-        return [self.lastfm.normalize_track_data(track) for track in tracks] 
+        return [self.lastfm.normalize_track_data(track) for track in tracks]
+
+    def get_lastfm_tracks(self, username: str, import_type: str, period: str, limit: int) -> List[Dict]:
+        """Get tracks from Last.fm with rate limiting and error handling"""
+        try:
+            params = {
+                'method': f'user.get{import_type.title()}',
+                'user': username,
+                'api_key': self.lastfm_api_key,
+                'format': 'json',
+                'limit': limit
+            }
+            
+            if import_type != 'loved':
+                params['period'] = period
+                
+            response = requests.get(self.lastfm_base_url, params=params)
+            response.raise_for_status()
+            
+            data = response.json()
+            tracks = []
+            
+            if import_type == 'loved':
+                tracks = data['lovedtracks']['track']
+            else:
+                tracks = data['toptracks']['track']
+                
+            # Truncate track names to 200 characters
+            for track in tracks:
+                track['name'] = track['name'][:200]
+                track['artist']['name'] = track['artist']['name'][:200]
+                
+            return tracks
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching Last.fm tracks: {str(e)}")
+            raise Exception(f"Failed to fetch tracks from Last.fm: {str(e)}")
+            
+    def search_spotify_track(self, track: Dict[str, str]) -> Optional[Dict[str, Any]]:
+        """Search for a track on Spotify with better error handling and retries"""
+        try:
+            # Truncate track name to 200 characters to avoid API limits
+            track_name = track['name'][:200]
+            artist_name = track['artist']
+            
+            # Try exact match first
+            query = f"track:{track_name} artist:{artist_name}"
+            results = self.spotify.search(query, limit=1, type='track')
+            
+            if results['tracks']['items']:
+                return results['tracks']['items'][0]
+            
+            # If no exact match, try with just the track name
+            results = self.spotify.search(track_name, limit=1, type='track')
+            if results['tracks']['items']:
+                return results['tracks']['items'][0]
+            
+            logger.warning(f"No match found for track: {track_name} by {artist_name}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error searching for track {track.get('name', 'unknown')}: {str(e)}")
+            return None
+
+    def create_spotify_playlist(self, token: str, name: str, tracks: List[Dict]) -> Dict:
+        """Create a Spotify playlist with error handling"""
+        try:
+            headers = {
+                'Authorization': f"Bearer {token}",
+                'Content-Type': 'application/json'
+            }
+            
+            # Get user profile
+            response = requests.get(f"{self.spotify_base_url}/me", headers=headers)
+            response.raise_for_status()
+            user_id = response.json()['id']
+            
+            # Create playlist
+            response = requests.post(
+                f"{self.spotify_base_url}/users/{user_id}/playlists",
+                headers=headers,
+                json={'name': name, 'public': False}
+            )
+            response.raise_for_status()
+            playlist = response.json()
+            
+            # Add tracks in chunks of 100 (Spotify's limit)
+            track_uris = [track['uri'] for track in tracks]
+            for i in range(0, len(track_uris), 100):
+                chunk = track_uris[i:i + 100]
+                response = requests.post(
+                    f"{self.spotify_base_url}/playlists/{playlist['id']}/tracks",
+                    headers=headers,
+                    json={'uris': chunk}
+                )
+                response.raise_for_status()
+                
+            return playlist
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error creating Spotify playlist: {str(e)}")
+            raise Exception(f"Failed to create Spotify playlist: {str(e)}") 

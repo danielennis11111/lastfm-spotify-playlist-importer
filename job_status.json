@@ -1,0 +1,56 @@
+{
+  "anonymous_1749522186": {
+    "id": "anonymous_1749522186",
+    "user_id": "anonymous",
+    "type": "import",
+    "params": {
+      "username": "carseatheadrest",
+      "import_type": "loved",
+      "period": "overall",
+      "limit": 50
+    },
+    "status": "failed",
+    "progress": 0,
+    "message": "Import failed: name 'LASTFM_API_KEY' is not defined",
+    "created_at": "2025-06-09T19:23:06.121466",
+    "updated_at": "2025-06-09T19:23:06.122490",
+    "error": "name 'LASTFM_API_KEY' is not defined",
+    "result": null
+  },
+  "anonymous_1749522668": {
+    "id": "anonymous_1749522668",
+    "user_id": "anonymous",
+    "type": "import",
+    "params": {
+      "username": "italiakitty",
+      "import_type": "top",
+      "period": "overall",
+      "limit": 1000
+    },
+    "status": "failed",
+    "progress": 0,
+    "message": "Import failed: name 'LASTFM_API_KEY' is not defined",
+    "created_at": "2025-06-09T19:31:08.069292",
+    "updated_at": "2025-06-09T19:31:08.071103",
+    "error": "name 'LASTFM_API_KEY' is not defined",
+    "result": null
+  },
+  "anonymous_1749523238": {
+    "id": "anonymous_1749523238",
+    "user_id": "anonymous",
+    "type": "import",
+    "params": {
+      "username": "ryanboswell",
+      "import_type": "loved",
+      "period": "overall",
+      "limit": 50
+    },
+    "status": "failed",
+    "progress": 0,
+    "message": "Import failed: name 'LASTFM_API_KEY' is not defined",
+    "created_at": "2025-06-09T19:40:38.875999",
+    "updated_at": "2025-06-09T19:40:38.877740",
+    "error": "name 'LASTFM_API_KEY' is not defined",
+    "result": null
+  }
+}
