@@ -1,0 +1,31 @@
+# Enable mod_rewrite
+RewriteEngine On
+
+# Set the base directory
+RewriteBase /lastfm-to-spotify-importer/
+
+# If the requested filename exists, serve it directly
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# For WSGI deployment
+# If your hosting provides Python/WSGI support, uncomment and adjust as needed:
+# RewriteRule ^(.*)$ wsgi.py/$1 [QSA,L]
+
+# For CGI deployment
+# If using CGI, uncomment and adjust:
+# RewriteRule ^(.*)$ cgi-bin/app.cgi/$1 [QSA,L]
+
+# Prevent direct access to .env file
+<Files ~ "\.env$">
+  Order allow,deny
+  Deny from all
+</Files>
+
+# Prevent directory listing
+Options -Indexes
+
+# Set environment variables (if your server supports it)
+SetEnv ENVIRONMENT production
+SetEnv APP_BASE_PATH /lastfm-to-spotify-importer 

@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LastFM to Spotify Playlist Converter</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f5f5f5;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .header {
+            background: linear-gradient(135deg, #1db954, #191414);
+            color: white;
+            padding: 2rem 0;
+            margin-bottom: 2rem;
+        }
+        .logo-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1rem;
+        }
+        .logo {
+            max-height: 60px;
+            margin: 0 15px;
+        }
+        .container {
+            max-width: 800px;
+        }
+        .card {
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        .btn-primary {
+            background-color: #1db954;
+            border-color: #1db954;
+        }
+        .btn-primary:hover {
+            background-color: #1ed760;
+            border-color: #1ed760;
+        }
+        .btn-outline-primary {
+            color: #1db954;
+            border-color: #1db954;
+        }
+        .btn-outline-primary:hover {
+            background-color: #1db954;
+            border-color: #1db954;
+        }
+        .progress {
+            height: 20px;
+            margin-top: 1rem;
+        }
+        .user-info {
+            display: none;
+            padding: 15px;
+            margin-top: 15px;
+            border-radius: 8px;
+            background-color: #f8f9fa;
+        }
+        #import-results {
+            display: none;
+            margin-top: 20px;
+        }
+        .import-type-btn.active {
+            background-color: #1db954;
+            color: white;
+        }
+        .spotify-user-info {
+            padding: 15px;
+            margin-top: 15px;
+            border-radius: 8px;
+            background-color: #191414;
+            color: white;
+            display: none;
+        }
+        #spotify-login-card {
+            margin-bottom: 2rem;
+        }
+        .spotify-logo {
+            width: 24px;
+            height: 24px;
+            margin-right: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header text-center">
+        <div class="logo-container">
+            <img src="https://cdn.iconscout.com/icon/free/png-256/free-lastfm-4-432581.png" alt="LastFM Logo" class="logo">
+            <h1>→</h1>
+            <img src="https://cdn.iconscout.com/icon/free/png-256/free-spotify-11-432546.png" alt="Spotify Logo" class="logo">
+        </div>
+        <h1>LastFM to Spotify Playlist Converter</h1>
+        <p class="lead">Import your LastFM listening history to Spotify playlists</p>
+    </div>
+
+    <div class="container">
+        <!-- Spotify Authentication Card -->
+        <div class="card" id="spotify-login-card">
+            <div class="card-body">
+                <h2 class="card-title mb-3">Step 1: Connect to Spotify</h2>
+                <p class="card-text">To create playlists, you need to connect your Spotify account first.</p>
+                
+                <div id="spotify-login-btn-container" class="d-grid gap-2">
+                    <a href="{{ spotify_auth_url }}" class="btn btn-primary btn-lg">
+                        <img src="https://cdn.iconscout.com/icon/free/png-256/free-spotify-11-432546.png" alt="Spotify" class="spotify-logo">
+                        Connect to Spotify
+                    </a>
+                </div>
+                
+                <div class="spotify-user-info" id="spotify-user-info-card">
+                    <div class="d-flex align-items-center">
+                        <div id="spotify-user-image-container" class="me-3">
+                            <img id="spotify-user-image" src="" alt="Spotify profile" class="rounded-circle" style="width: 50px; height: 50px;">
+                        </div>
+                        <div>
+                            <h5 id="spotify-display-name">Not Connected</h5>
+                            <p class="mb-0">
+                                <span id="spotify-connected-status">Connected to Spotify</span>
+                                <a href="/logout" class="btn btn-sm btn-outline-light ms-2">Disconnect</a>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <h2 class="card-title mb-4">Step 2: Import LastFM Data</h2>
+                
+                <form id="import-form">
+                    <div class="mb-3">
+                        <label for="lastfm-username" class="form-label">LastFM Username</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="lastfm-username" name="lastfm_username" placeholder="Enter your LastFM username" required>
+                            <button type="button" class="btn btn-outline-primary" id="check-user-btn">Check User</button>
+                        </div>
+                    </div>
+                    
+                    <div class="user-info mb-3" id="user-info-card">
+                        <div class="d-flex align-items-center">
+                            <div id="user-image-container" class="me-3">
+                                <img id="user-image" src="" alt="User profile" class="rounded-circle" style="width: 50px; height: 50px;">
+                            </div>
+                            <div>
+                                <h5 id="user-display-name">User Name</h5>
+                                <p class="mb-0" id="user-stats">Loading user stats...</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Import Type</label>
+                        <div class="btn-group w-100" role="group">
+                            <input type="radio" class="btn-check" name="import_type" id="top-tracks" value="top" checked>
+                            <label class="btn btn-outline-primary import-type-btn" for="top-tracks">Top Tracks</label>
+                            
+                            <input type="radio" class="btn-check" name="import_type" id="recent-tracks" value="recent">
+                            <label class="btn btn-outline-primary import-type-btn" for="recent-tracks">Recent Tracks</label>
+                            
+                            <input type="radio" class="btn-check" name="import_type" id="loved-tracks" value="loved">
+                            <label class="btn btn-outline-primary import-type-btn" for="loved-tracks">Loved Tracks</label>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3" id="period-selector">
+                        <label for="period" class="form-label">Time Period</label>
+                        <select class="form-select" id="period" name="period">
+                            <option value="overall">All Time</option>
+                            <option value="7day">Last 7 Days</option>
+                            <option value="1month">Last Month</option>
+                            <option value="3month">Last 3 Months</option>
+                            <option value="6month">Last 6 Months</option>
+                            <option value="12month">Last 12 Months</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="limit" class="form-label">Number of tracks to import (max 10,000)</label>
+                        <input type="number" class="form-control" id="limit" name="limit" 
+                               min="1" max="10000" value="50" required>
+                        <div class="form-text">Enter the number of tracks you want to import (1-10,000)</div>
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary btn-lg" id="start-import-btn" disabled>Start Import</button>
+                    </div>
+                </form>
+                
+                <div id="import-progress" style="display: none;">
+                    <h4 class="mt-4">Import Progress</h4>
+                    <div class="progress" style="height: 20px;">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                    </div>
+                    <div class="mt-2 text-muted small">
+                        <i class="fas fa-info-circle"></i> You can close this window - the playlist will be created in your Spotify account when processing is complete.
+                    </div>
+                    <div id="status-message" class="mt-3"></div>
+                </div>
+                
+                <div id="import-results">
+                    <div class="alert alert-success">
+                        <h4>Import Complete!</h4>
+                        <p id="result-message"></p>
+                        <div id="playlist-link-container">
+                            <a href="#" id="playlist-link" target="_blank" class="btn btn-success mt-2">Open Playlist</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Add these variables at the top of the script
+        let currentJobId = null;
+        let statusCheckInterval = null;
+        
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Page loaded, checking auth status...');
+            // Check Spotify auth status
+            fetch('/check_auth')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Auth check response:', data);
+                    const authStatus = document.getElementById('spotify-connected-status');
+                    const authButton = document.getElementById('spotify-login-btn-container');
+                    const importForm = document.getElementById('import-form');
+                    
+                    if (data.authenticated) {
+                        console.log('User is authenticated');
+                        authStatus.textContent = `Connected to Spotify as ${data.user_info.name}`;
+                        authButton.style.display = 'none';
+                        importForm.style.display = 'block';
+                    } else {
+                        console.log('User is not authenticated');
+                        authStatus.textContent = 'Not Connected';
+                        authButton.style.display = 'block';
+                        importForm.style.display = 'none';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking auth:', error);
+                });
+            
+            // Show/hide period selector based on import type
+            const importTypeRadios = document.querySelectorAll('input[name="import_type"]');
+            const periodSelector = document.getElementById('period-selector');
+            
+            importTypeRadios.forEach(radio => {
+                radio.addEventListener('change', function() {
+                    if (this.value === 'top') {
+                        periodSelector.style.display = 'block';
+                    } else {
+                        periodSelector.style.display = 'none';
+                    }
+                });
+            });
+            
+            // Check LastFM user
+            const checkUserBtn = document.getElementById('check-user-btn');
+            const userInfoCard = document.getElementById('user-info-card');
+            const userDisplayName = document.getElementById('user-display-name');
+            const userStats = document.getElementById('user-stats');
+            const userImage = document.getElementById('user-image');
+            
+            checkUserBtn.addEventListener('click', function() {
+                const username = document.getElementById('lastfm-username').value;
+                if (!username) return;
+                
+                checkUserBtn.disabled = true;
+                checkUserBtn.textContent = 'Checking...';
+                
+                fetch(`/user_info/${username}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            alert(`Error: ${data.error}`);
+                            return;
+                        }
+                        
+                        userDisplayName.textContent = data.realname || data.name || username;
+                        userStats.textContent = `${parseInt(data.playcount).toLocaleString()} scrobbles · ${data.country || 'Unknown location'}`;
+                        
+                        if (data.image && data.image.length > 0) {
+                            const imageUrl = data.image[data.image.length - 1]['#text'];
+                            userImage.src = imageUrl || 'https://lastfm.freetls.fastly.net/i/u/avatar170s/818148bf682d429dc215c1705eb27b98.jpg';
+                        } else {
+                            userImage.src = 'https://lastfm.freetls.fastly.net/i/u/avatar170s/818148bf682d429dc215c1705eb27b98.jpg';
+                        }
+                        
+                        userInfoCard.style.display = 'block';
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('Error checking user. Please try again.');
+                    })
+                    .finally(() => {
+                        checkUserBtn.disabled = false;
+                        checkUserBtn.textContent = 'Check User';
+                    });
+            });
+            
+            // Handle form submission
+            const importForm = document.getElementById('import-form');
+            const importProgress = document.getElementById('import-progress');
+            const importResults = document.getElementById('import-results');
+            const statusMessage = document.getElementById('status-message');
+            const progressBar = document.querySelector('.progress-bar');
+            const resultMessage = document.getElementById('result-message');
+            const playlistLink = document.getElementById('playlist-link');
+            
+            importForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                const formData = new FormData(importForm);
+                
+                // Show progress section
+                importProgress.style.display = 'block';
+                importResults.style.display = 'none';
+                
+                // Disable form
+                const formElements = importForm.elements;
+                for (let i = 0; i < formElements.length; i++) {
+                    formElements[i].disabled = true;
+                }
+                
+                // Start import
+                fetch('/start_import', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        statusMessage.textContent = `Error: ${data.error}`;
+                        return;
+                    }
+                    
+                    const jobId = data.job_id;
+                    checkJobStatus(jobId);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    statusMessage.textContent = 'Error starting import. Please try again.';
+                    
+                    // Re-enable form
+                    for (let i = 0; i < formElements.length; i++) {
+                        formElements[i].disabled = false;
+                    }
+                });
+            });
+            
+            // Update the importPlaylist function
+            async function importPlaylist() {
+                console.log('Starting import...');
+                const lastfmUsername = document.getElementById('lastfm-username').value;
+                const trackLimit = parseInt(document.getElementById('limit').value);
+                
+                if (!lastfmUsername) {
+                    alert('Please enter your Last.fm username');
+                    return;
+                }
+                
+                if (trackLimit < 1 || trackLimit > 10000) {
+                    alert('Track limit must be between 1 and 10,000');
+                    return;
+                }
+                
+                // Show progress section
+                importProgress.style.display = 'block';
+                importResults.style.display = 'none';
+                progressBar.style.width = '0%';
+                statusMessage.textContent = 'Starting import...';
+                
+                try {
+                    console.log('Sending import request...');
+                    const response = await fetch('/import_playlist', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: new URLSearchParams({
+                            'lastfm_username': lastfmUsername,
+                            'track_limit': trackLimit
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    console.log('Import response:', data);
+                    
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                    
+                    // Store the job ID and start checking status
+                    currentJobId = data.job_id;
+                    startStatusCheck();
+                    
+                } catch (error) {
+                    console.error('Error:', error);
+                    statusMessage.textContent = `Error: ${error.message}`;
+                }
+            }
+            
+            // Add the status checking function
+            function startStatusCheck() {
+                console.log('Starting status check for job:', currentJobId);
+                if (statusCheckInterval) {
+                    clearInterval(statusCheckInterval);
+                }
+                
+                statusCheckInterval = setInterval(checkJobStatus, 2000);
+            }
+            
+            async function checkJobStatus() {
+                if (!currentJobId) return;
+                
+                try {
+                    console.log('Checking job status...');
+                    const response = await fetch(`/check_status/${currentJobId}`);
+                    const data = await response.json();
+                    console.log('Status response:', data);
+                    
+                    if (data.error) {
+                        throw new Error(data.error);
+                    }
+                    
+                    // Update progress
+                    progressBar.style.width = `${data.progress}%`;
+                    statusMessage.textContent = 
+                        `Processing tracks: ${data.processed_tracks} of ${data.total_tracks} (${data.progress}%)`;
+                    
+                    // Handle completion or failure
+                    if (data.status === 'completed') {
+                        console.log('Job completed successfully');
+                        clearInterval(statusCheckInterval);
+                        statusMessage.textContent = 
+                            `Import completed! Playlist created successfully.`;
+                        playlistLink.href = data.playlist_url;
+                        playlistLink.style.display = 'block';
+                        currentJobId = null;
+                    } else if (data.status === 'failed') {
+                        console.log('Job failed:', data.error);
+                        clearInterval(statusCheckInterval);
+                        statusMessage.textContent = 
+                            `Import failed: ${data.error || 'Unknown error'}`;
+                        currentJobId = null;
+                    }
+                    
+                } catch (error) {
+                    console.error('Error checking status:', error);
+                    clearInterval(statusCheckInterval);
+                    statusMessage.textContent = 
+                        `Error checking status: ${error.message}`;
+                    currentJobId = null;
+                }
+            }
+            
+            // Add cleanup on page unload
+            window.addEventListener('beforeunload', () => {
+                if (statusCheckInterval) {
+                    clearInterval(statusCheckInterval);
+                }
+            });
+        });
+    </script>
+</body>
+</html> 

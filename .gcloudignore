@@ -1,0 +1,39 @@
+# Python pycache:
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+.venv/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Local development settings
+.env
+.cache
+
+# Logs
+*.log
+
+# Git and version control
+.git/
+.gitignore
+.github/
+.gitattributes
+
+# Editor directories and files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Other
+.DS_Store
+README.md
+QUICKSTART.md
+WEB_INTERFACE.md
+*.md 
