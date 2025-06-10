@@ -43,39 +43,38 @@ class SpotifyClient:
         except Exception as e:
             raise Exception(f"Failed to connect to Spotify API: {e}")
     
-    def _truncate_search_query(self, artist: str, track: str) -> str:
-        """Truncate the search query to fit within Spotify's 250 character limit.
-        Preserves the full artist name and truncates the track name if needed."""
-        # Reserve space for "artist:" prefix and quotes
-        artist_prefix = f'artist:"{artist}"'
-        max_track_length = 250 - len(artist_prefix) - 10  # 10 chars for safety margin
+    def _truncate_search_query(self, artist: str, track: str) -> Tuple[str, str]:
+        """Truncate search query to fit within Spotify's 250 character limit"""
+        # Start with just the artist name
+        query = f"artist:{artist}"
         
+        # If adding the track name would exceed the limit, truncate the track name
+        max_track_length = 250 - len(query) - 10  # Leave some room for "track:" and spaces
         if len(track) > max_track_length:
-            # Truncate track name and add ellipsis
-            track = track[:max_track_length-3] + "..."
+            # Try to truncate at a word boundary
+            truncated_track = track[:max_track_length].rsplit(' ', 1)[0]
+            return artist, truncated_track
         
-        return f'{artist_prefix} track:"{track}"'
+        return artist, track
 
-    def search_track(self, artist: str, track: str) -> List[Dict]:
-        """Search for a track on Spotify."""
+    def search_track(self, artist: str, track: str, limit: int = 10) -> List[Dict]:
+        """Search for a track on Spotify"""
         try:
             # Truncate the search query if needed
-            query = self._truncate_search_query(artist, track)
+            artist, track = self._truncate_search_query(artist, track)
             
-            results = self.sp.search(
-                q=query,
-                limit=10,
-                offset=0,
-                type='track',
-                market=None
-            )
+            # Construct the search query
+            query = f"artist:{artist} track:{track}"
+            
+            # Search for the track
+            results = self.sp.search(query, limit=limit, type='track')
             
             if not results['tracks']['items']:
                 return []
-                
+            
             return results['tracks']['items']
         except Exception as e:
-            print(f"Error searching for track {track} by {artist}: {str(e)}")
+            print(f"Error searching for track: {e}")
             return []
     
     def search_track_fuzzy(self, artist: str, track: str) -> List[Dict]:

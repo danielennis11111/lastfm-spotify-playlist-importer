@@ -1,6 +1,6 @@
 # 🎵 Last.fm to Spotify Playlist Converter
 
-A web application that allows users to convert their Last.fm playlists to Spotify playlists. The application uses OAuth2 for secure authentication with Spotify and maintains user sessions for a seamless experience.
+Convert your Last.fm listening data into Spotify playlists automatically! This tool fetches your music data from Last.fm's free API and creates corresponding playlists in your Spotify account.
 
 ## Features
 
@@ -12,9 +12,6 @@ A web application that allows users to convert their Last.fm playlists to Spotif
 - **Customization**: Custom playlist names, descriptions, and privacy settings
 - **Rate Limiting**: Respects API rate limits to avoid getting blocked
 - **Progress Tracking**: Real-time progress bars for long operations
-- **Secure Spotify OAuth2 authentication**
-- **Automatic token refresh handling**
-- **Secure session management**
 
 ## Prerequisites
 
@@ -29,56 +26,37 @@ A web application that allows users to convert their Last.fm playlists to Spotif
 3. Get your **Client ID** and **Client Secret**
 4. Set the **Redirect URI** to: `http://127.0.0.1:8000/callback`
 
-### 3. Python 3.8+
+## Installation
 
-### 4. Google Cloud Platform account (for deployment)
-
-## Environment Variables
-
-Create a `.env` file with the following variables:
-
-```env
-# Last.fm API Configuration
-LASTFM_API_KEY=your_lastfm_api_key
-
-# Spotify API Configuration
-SPOTIFY_CLIENT_ID=your_spotify_client_id
-SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
-SPOTIFY_REDIRECT_URI=http://127.0.0.1:8000/callback
-```
-
-## Local Development
-
-1. Clone the repository
-2. Create and activate a virtual environment:
+1. **Clone the repository**:
    ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   git clone <repository-url>
+   cd spotify-playlist-converter
    ```
-3. Install dependencies:
+
+2. **Install dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
-4. Run the application:
+
+3. **Set up API credentials**:
+   
+   **Option A: Interactive Setup (Recommended)**
    ```bash
-   python app.py
+   python main.py setup
    ```
-
-## Deployment
-
-The application is configured for deployment on Google Cloud Run. Use the provided `deploy.sh` script:
-
-```bash
-./deploy.sh
-```
-
-## Security
-
-- OAuth2 state parameter verification
-- Secure session management
-- Environment variable protection
-- HTTPS enforcement
-- No sensitive data logging
+   
+   **Option B: Manual Setup**
+   Create a `.env` file in the project directory:
+   ```env
+   # Last.fm API Configuration
+   LASTFM_API_KEY=your_lastfm_api_key_here
+   
+   # Spotify API Configuration
+   SPOTIFY_CLIENT_ID=your_spotify_client_id_here
+   SPOTIFY_CLIENT_SECRET=your_spotify_client_secret_here
+   SPOTIFY_REDIRECT_URI=http://127.0.0.1:8000/callback
+   ```
 
 ## Usage
 
@@ -257,15 +235,11 @@ print(results)
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is for educational and personal use. Please respect the API terms of service for both Last.fm and Spotify.
 
 ## Disclaimer
 
